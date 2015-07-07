@@ -1,0 +1,31 @@
+{
+  "author": "David Oliveira <d.oliveira@prozone.org>",
+  "name": "solidqueue",
+  "description": "A solid and safe (stateful and crash-safe) queue with a simple interface",
+  "version": "0.1.0",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/davidfoliveira/node-solidqueue/"
+  },
+  "main": "./solidqueue.js",
+  "bin": {},
+  "dependencies": {
+    "async": ">=1.3.0",
+    "fnlock": ">=0.0.4"
+  },
+  "devDependencies": {},
+  "optionalDependencies": {},
+  "license": "Copyleft",
+  "engines": {
+    "node": ">=0.10.5"
+  },
+  "keywords": [
+    "queue",
+    "crash",
+    "safe",
+    "solid",
+    "state",
+    "solidqueue",
+    "safequeue"
+  ]
+}

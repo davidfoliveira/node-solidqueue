@@ -1,0 +1,8 @@
+#!/bin/sh
+
+mkdir -p test/data
+ls -1 test | grep ".js" | while read file; do
+	echo "Running test $file:";
+	node "test/$file" || exit -1;
+	echo
+done && echo 'Everything OK!'
