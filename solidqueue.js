@@ -29,6 +29,7 @@ module.exports = function(opts){
 	self.push			= queuePush;
 	self.shift			= queueShift;
 	self.compile		= _compileFile;
+	self.save			= _compileFile;
 	self.toArray		= function(){ return self._q; };
 
 	// Work on the options
@@ -48,6 +49,7 @@ module.exports = function(opts){
 		self._compileFile();
 
 		// Ready!
+		self._ready = true;
 		self.emit('ready',true);
 	}
 
@@ -153,7 +155,6 @@ function _loadAsync(handler) {
 			if ( err ) {
 				console.log("Error openning queue file '"+opts.file+"': ",err);
 				self.emit('error','load',err);
-				self.emit('ready');
 				return;
 			}
 
@@ -410,6 +411,9 @@ function queuePush(data,handler) {
     if ( !handler && !this._opts.sync )
     	throw new Error("Trying to use a syncronous version of push() but the queue is not on syncronous mode (sync option)");
 
+	if ( !this._ready )
+		throw new Error("The queue is not yet ready. Wait for 'ready' event");
+
 	// Add to memory queue
 	this._q.push({type: type, data: data});
 	this._dirty = true;
@@ -439,6 +443,9 @@ function queueShift(handler) {
 
     if ( !handler && !this._opts.sync )
     	throw new Error("Trying to use a syncronous version of push() but the queue is not on syncronous mode (sync option)");
+
+	if ( !this._ready )
+		throw new Error("The queue is not yet ready. Wait for 'ready' event");
 
 	// Nothing in memory, nothing on the file
 	if ( this._q.length == 0 )
@@ -490,6 +497,7 @@ function _writeFileAsync(data,handler) {
 
 	// Lock the file writing
 	fnlock.lock('fileWrite',function(release){
+
 		return fs.write(self._fd,data,0,data.length,null,function(err,res){
 			if ( err ) {
 				console.log("Error writing data to file: ",err);
