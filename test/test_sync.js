@@ -1,6 +1,6 @@
 var
 	fs = require('fs'),
-    SafeQueue = require('../safequeue'),
+    SolidQueue = require('../solidqueue'),
     queue,
 	got;
 
@@ -8,7 +8,7 @@ var
 try { fs.unlink("test/data/file_sync.db"); } catch(ex) { }
 
 // Create the queue
-queue = new SafeQueue("test/data/file_sync.db");
+queue = new SolidQueue("test/data/file_sync.db");
 
 // Push a number
 queue.push("a");
