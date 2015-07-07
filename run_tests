@@ -6,3 +6,4 @@ ls -1 test | grep ".js" | while read file; do
 	node "test/$file" || exit -1;
 	echo
 done && echo 'Everything OK!'
+rm -rf test/data

@@ -2,10 +2,11 @@ var
 	fs = require('fs'),
     SolidQueue = require('../solidqueue'),
     queue,
-	got;
+	got,
+	stat;
 
 // Remove the queue file
-try { fs.unlink("test/data/file_sync.db"); } catch(ex) { }
+try { fs.unlinkSync("test/data/file_sync.db"); } catch(ex) { }
 
 // Create the queue
 queue = new SolidQueue("test/data/file_sync.db");
@@ -36,5 +37,15 @@ if ( typeof got != "object" || Object.keys(got).length != 1 || got.x != 1 ) {
 	return process.exit(-1);
 }
 console.log("shift(push(object)): ok");
+
+// Compile and watch the file size, as do be zero
+queue.compile();
+
+stat = fs.statSync("test/data/file_sync.db");
+if ( stat.size != 0 ) {
+	console.log("fsize(): failed. Expecting a queue file with zero bytes but the file has "+stat.size+" bytes");
+	return process.exit(-1);
+}
+console.log("fsize(): ok");
 
 return process.exit(0);
