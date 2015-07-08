@@ -2,6 +2,7 @@ var
 	fs = require('fs'),
     SolidQueue = require('../solidqueue'),
     queue,
+	item,
 	got,
 	stat;
 
@@ -13,29 +14,35 @@ queue = new SolidQueue({file:"test/data/file_sync.db",sync:true});
 
 // Push a number
 queue.push("a");
-got = queue.shift();
+item = queue.shift();
+got = item.data;
 if ( typeof got != "string" || got != "a" ) {
-	console.log("shift(push(string)): failed! Expecting a number = \"a\" and got "+((got==null)?"nothing":("a "+typeof(got)+" = "+got)));
+	console.log("shift(push(string)): failed! Expecting a string = \"a\" and got "+((got==null)?"nothing":("a "+typeof(got)+" = "+JSON.stringify(got))));
 	return process.exit(-1);
 }
+item.ack();
 console.log("shift(push(string)): ok");
 
 // Push a number
 queue.push(123);
-got = queue.shift();
+item = queue.shift();
+got = item.data;
 if ( typeof got != "number" || got != 123 ) {
-	console.log("shift(push(number)): failed! Expecting a number = 123 and got "+((got==null)?"nothing":("a "+typeof(got)+" = "+got)));
+	console.log("shift(push(number)): failed! Expecting a number = 123 and got "+((got==null)?"nothing":("a "+typeof(got)+" = "+JSON.stringify(got))));
 	return process.exit(-1);
 }
+item.ack();
 console.log("shift(push(number)): ok");
 
 // Push an object
 queue.push({x:1});
-got = queue.shift();
+item = queue.shift();
+got = item.data;
 if ( typeof got != "object" || Object.keys(got).length != 1 || got.x != 1 ) {
 	console.log("shift(push(number)): failed! Expecting an object = {x:1} and got "+((got==null)?"nothing":("a "+typeof(got)+" = "+JSON.stringify(got))));
 	return process.exit(-1);
 }
+item.ack();
 console.log("shift(push(object)): ok");
 
 // Compile and watch the file size, as do be zero

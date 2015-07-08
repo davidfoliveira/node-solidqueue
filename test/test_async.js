@@ -22,13 +22,16 @@ queue.on('ready',function(){
 	async.mapSeries(tests,
 		function(test,next){
 			n++;
+
+			// Push
 			queue.push(test,function(err){
 				if ( err ) {
 					console.log("shift(push("+JSON.stringify(test)+")): failed! Error pushing data for test #"+n+": ",err);
 					return process.exit(-2);
 				}
 
-				queue.shift(function(err,item){
+				// Shift
+				queue.shift(function(err,item,ack){
 					if ( err ) {
 						console.log("shift(push("+JSON.stringify(test)+")): failed! Error shifting data for test #"+n+": ",err);
 						return process.exit(-2);
@@ -39,8 +42,16 @@ queue.on('ready',function(){
 						return process.exit(-1);
 					}
 
-					console.log("shift(push("+JSON.stringify(test)+")): ok");
-					return next();
+					// Acknowledge
+/*					ack(function(err,ok){
+						if ( err ) {
+							console.log("shift(push("+JSON.stringify(test)+")): failed! Error acknowledging item "+item+": ",err);
+							return process.exit(-1);
+						}
+*/
+						console.log("shift(push("+JSON.stringify(test)+")): ok");
+						return next();
+//					});
 				});
 			});
 		},

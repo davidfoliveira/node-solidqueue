@@ -32,11 +32,15 @@ module.exports = function(opts){
 	self._init				= _init;
 	self._initSync			= _initSync;
 	self._initAsync			= _initAsync;
+	self._itemAckSync		= _itemAckSync;
+	self._itemAckAsync		= _itemAckAsync;
 	self.push				= queuePush;
 	self.shift				= queueShift;
 	self.compile			= _compileFile;
 	self.save				= _compileFile;
 	self.toArray			= function(){ return self._q; };
+	self.length				= function(){ return self._q.length; };
+	self.size				= self.length;
 
 	// Work on the options
 	if ( typeof opts == "string" )
@@ -414,8 +418,22 @@ function _compileFileAsync(handler) {
 function queuePush(data,handler) {
 
 	var
+		self = this,
 		item,
-		b;
+		b,
+		checkWaitersAndGo = function(err,res){
+
+			// Call the callback
+			handler(err,res);
+
+			// Distribute queue items by waiting handlers
+			if ( self._waitData.length > 0 ) {
+				while ( self._waitData.length > 0 && self._q.length > 0 ) {
+					_queueShift.apply(self,[self._waitData.shift()]);
+				}
+			}
+
+		};
 
     if ( !handler && !this._opts.sync )
     	throw new Error("Trying to use a syncronous version of push() but the queue is not on syncronous mode (sync option)");
@@ -439,7 +457,7 @@ function queuePush(data,handler) {
 	b = _itemToBuffer(item);
 
 	// Add to file
-	return handler ? _writeFileAsync.apply(this,[b,handler]) : _writeFileSync.apply(this,[b]);
+	return handler ? _writeFileAsync.apply(this,[b,checkWaitersAndGo]) : _writeFileSync.apply(this,[b]);
 
 }
 
@@ -447,6 +465,7 @@ function queuePush(data,handler) {
 function queueShift(handler) {
 
 	var
+		self = this,
 		item,
 		b;
 
@@ -456,8 +475,9 @@ function queueShift(handler) {
 	if ( !this._ready )
 		throw new Error("The queue is not yet ready. Wait for 'ready' event");
 
+
 	// Nothing in memory, nothing on the file
-	if ( this._q.length == 0 ) {
+	if ( self._q.length == 0 ) {
 
 		// Syncronous mode just returns null (what can we do?)
 		if ( self._opts.sync )
@@ -468,7 +488,7 @@ function queueShift(handler) {
 	}
 
 	// Now that we have data, proceed!
-	return _queueShift.apply(this,[handler]);
+	return _queueShift.apply(self,[handler]);
 
 }
 
@@ -476,37 +496,59 @@ function queueShift(handler) {
 function _queueShift(handler) {
 
 	var
-		item,
-		b;
+		self = this,
+		item;
 
 	// Get data from memory
 	item = this._q.shift();
 
-	// We are dirty (requiring a compile)
-	this._dirty = true;
+	// Return the data and the acknowledge function
+	if ( self._opts.sync ) {
+		return {data: item.data, ack: function(){
+			return self._itemAckSync(item);
+		}};
+	}
+	else {
+		return handler(null,item.data,function(cb){
+			return self._itemAckAsync(item,cb);
+		},item);
+	}
+}
 
+// Acknowledge an item (syncronously)
+function _itemAckSync(item) {
+
+	var
+		b;
 
 	// Write a "shift" to file
 	b = _entryEncode({op:2,id:item.id});
 
-	// Remove from file asyncronously
-	if ( !this._opts.sync ) {
-		return _writeFileAsync.apply(this,[b,function(err){
-			if ( err ) {
-				console.log("Error writing the shift to disk: ",err);
-				return handler(err,null);
-			}
-
-			// Return the data
-			return handler(null,item.data);
-		}]);
-	}
-
 	// Remove from file syncronously
 	_writeFileSync.apply(this,[b]);
 
-	// Return the data
-	return item.data;
+//	console.log("Sync ack of '"+item.id+"'");
+
+}
+
+// Acknowledge an item (asyncronously)
+function _itemAckAsync(item,handler) {
+
+	var
+		b;
+
+	// Write a "shift" to file
+	b = _entryEncode({op:2,id:item.id});
+
+	return _writeFileAsync.apply(this,[b,function(err){
+		if ( err ) {
+			console.log("Error writing the shift to disk: ",err);
+			return handler(err,null);
+		}
+
+//		console.log("Async ack of '"+item.id+"'");
+		return handler(null,true);
+	}]);
 
 }
 
