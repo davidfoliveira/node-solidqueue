@@ -20,69 +20,29 @@ module.exports = function(opts){
 	self._compiling = false;
 
 	// My methods
-	self._loadSync		= _loadSync;
-	self._loadAsync		= _loadAsync;
-	self._loadProcessOp = _loadProcessOp;
-	self._compileFile	= _compileFile;
-	self._waitCompile	= [];
-	self._ready			= false;
-	self.push			= queuePush;
-	self.shift			= queueShift;
-	self.compile		= _compileFile;
-	self.save			= _compileFile;
-	self.toArray		= function(){ return self._q; };
+	self._loadSync			= _loadSync;
+	self._loadAsync			= _loadAsync;
+	self._loadProcessEntry	= _loadProcessEntry;
+	self._compileFile		= _compileFile;
+	self._init				= _init;
+	self._initSync			= _initSync;
+	self._initAsync			= _initAsync;
+	self._waitCompile		= [];
+	self._ready				= false;
+	self._drain				= true;
+	self.push				= queuePush;
+	self.shift				= queueShift;
+	self.compile			= _compileFile;
+	self.save				= _compileFile;
+	self.toArray			= function(){ return self._q; };
 
 	// Work on the options
 	if ( typeof opts == "string" )
 		opts = { file: opts, sync: true };
 	self._opts = opts;
 
-	// Syncronous way of initializing
-	if ( opts.sync ) {
-		// Load the queue file
-		self._loadSync();
-
-		// Open file for writing (append, like a journal)
-		self._fd = fs.openSync(self._opts.file,"a");
-
-		// Compile the file
-		self._compileFile();
-
-		// Ready!
-		self._ready = true;
-		self.emit('ready',true);
-	}
-
-	// Asyncronous way of initializing
-	else {
-		self._loadAsync(function(){
-
-			// Open file for writing (append, like a journal)
-			return fs.open(self._opts.file,"a",function(err,fd){
-				if ( err ) {
-					console.log("Error openning queue file '"+self._opts.file+"' for writing: ",err);
-					self.emit('error','open',err);
-				}
-				else {
-					self._fd = fd;
-				}
-
-				// Compile the file
-				return self._compileFile(function(err){
-					if ( err ) {
-						console.log("Error compiling queue file: ",err);
-						self.emit('error','compile',err);
-					}
-
-					// Ready!
-					self._ready = true;
-					self.emit('ready',true);
-				});
-			});
-
-		});
-	}
-
+	// Initialize
+	self._init();
 
 	// Compile the file periodically
 	if ( !opts.compileInterval || typeof opts.compileInterval != "number" )
@@ -96,6 +56,54 @@ module.exports = function(opts){
 };
 util.inherits(module.exports, events.EventEmitter);
 
+
+// Initialize (load queue file, open it for appending, compile it and ready!)
+function _init(handler) {
+
+	return this._opts.sync ? _initSync.apply(this) : _initAsync.apply(this,[handler]);
+
+}
+
+function _initSync() {
+
+	var	
+		self = this;
+
+	// Load the queue file
+	self._loadSync();
+
+	// Compile the file
+	self._compileFile();
+
+	// Ready!
+	self._ready = true;
+	self.emit('ready',true);
+
+}
+
+function _initAsync() {
+
+	var
+		self = this;
+
+	// Load the queue file
+	return self._loadAsync(function(){
+
+		// Compile the file
+		return self._compileFile(function(err){
+			if ( err ) {
+				console.log("Error compiling queue file: ",err);
+				self.emit('error','compile',err);
+			}
+
+			// Ready!
+			self._ready = true;
+			self.emit('ready',true);
+		});
+
+	});
+
+}
 
 // Load the queue file (syncronously)
 function _loadSync() {
@@ -113,20 +121,18 @@ function _loadSync() {
 	fd = fs.openSync(this._opts.file,"r");
 	while ( fs.readSync(fd,header,0,5) ) {
 		var
-			op   = (header[0] >> 4) & 0x0f,
-			type = header[0] & 0x0f,
-			size = (header[1] << 24) | (header[2] << 16) | (header[3] << 8) | header[4],
-			data = new Buffer(size),
+			entry = _entryDecodeHeader(header),
 			rBytes;
 
 		// Read data
-		if ( size > 0 && (rBytes = fs.readSync(fd,data,0,size)) < size ) {
-			console.log("Queue file appears to be corrupted (header size is "+size+" and got "+rBytes+")");
+		entry.data = new Buffer(entry.size);
+		if ( entry.size > 0 && (rBytes = fs.readSync(fd,data,0,entry.size)) < entry.size ) {
+			console.log("Queue file appears to be corrupted (header size is "+entry.size+" and got "+rBytes+")");
 			break;
 		}
 
 		// Process the operation
-		self._loadProcessOp(op,type,data,stats);
+		self._loadProcessEntry(entry,stats);
 	}
 	fs.close(fd);
 
@@ -188,17 +194,15 @@ function _loadAsync(handler) {
 						}
 
 						var
-							op   = (header[0] >> 4) & 0x0f,
-							type = header[0] & 0x0f,
-							size = (header[1] << 24) | (header[2] << 16) | (header[3] << 8) | header[4],
-							data = new Buffer(size);
+							entry	= _entryDecodeHeader(header);
 
-						aIf(size > 0,
+						return aIf(entry.size > 0,
 							function(proc){
 
 								// Read the data
-								return fs.read(fd,data,0,size,null,function(err,rBytes){
-									if ( rBytes < size ) {
+								entry.data = new Buffer(entry.size);
+								return fs.read(fd,entry.data,0,entry.size,null,function(err,rBytes){
+									if ( rBytes < entry.size ) {
 										console.log("Error reading data entry from queue file (got "+rBytes+" instead of "+size+")");
 										hasData = false;
 										return next(err,null);
@@ -208,8 +212,9 @@ function _loadAsync(handler) {
 								});
 							},
 							function(){
+
 								// Process the operation
-								self._loadProcessOp(op,type,data,stats);
+								self._loadProcessEntry(entry,stats);
 
 								return next();
 							}
@@ -237,30 +242,34 @@ function _loadAsync(handler) {
 
 }
 
-function _loadProcessOp(op,type,data,stats) {
+// Process an operation during load
+function _loadProcessEntry(entry,stats) {
+
+	var
+		data;
+
+	// Add to queue
+	if ( entry.op == 1 ) {
+		// Parse data according to it's type
+		data = (entry.type == 1) ? entry.data.toString() : (entry.type == 2) ? parseFloat(entry.data.toString()) : (entry.type == 3) ? null : JSON.parse(entry.data);
 
 		// Add to queue
-		if ( op == 1 ) {
-			// Parse data according to it's type
-			data = (type == 1) ? data.toString() : (type == 2) ? parseFloat(data.toString()) : (type == 3) ? null : JSON.parse(data);
+		this._q.push(data);
 
-			// Add to queue
-			this._q.push({type: type, data: data});
+		// Affect statistics
+		if ( stats )
+			stats.added++;
+	}
+	// Remove from queue
+	else if ( op == 2 ) {
 
-			// Affect statistics
-			if ( stats )
-				stats.added++;
-		}
 		// Remove from queue
-		else if ( op == 2 ) {
+		this._q.shift();
 
-			// Remove from queue
-			this._q.shift();
-
-			// Affect statistics
-			if ( stats )
-				stats.removed++;
-		}
+		// Affect statistics
+		if ( stats )
+			stats.removed++;
+	}
 
 }
 
@@ -285,21 +294,17 @@ function _compileFileSync() {
 	self._compiling = true;
 
 	// Close the already open file
-	fs.closeSync(self._fd);
-	self._fd = null;
+	if ( self._fd != null ) {
+		fs.closeSync(self._fd);
+		self._fd = null;
+	}
 
 	// Open file again for rewriting it
 	self._fd = fs.openSync(self._opts.file,"w");
 	self._q.forEach(function(item){
-		var strData;
-		strData = (type == 1) ? data : (type == 2) ? data.toString() : (type == 3) ? "" : JSON.stringify(data);
-	  	b = new Buffer("YXXXX"+strData);
-	    size = b.length - 5;
-	    b[0] = (0x01 << 4) | type;
-	    b[1] = (size >> 24  & 0xff);
-	    b[2] = (size >> 16  & 0xff);
-	    b[3] = (size >>  8  & 0xff);
-	    b[4] = (size        & 0xff);
+		var
+			b = _itemToBuffer(data);
+
 		fs.writeSync(this._fd,b,0,b.length,null);
 	});
 
@@ -329,74 +334,121 @@ function _compileFileAsync(handler) {
 	self._compiling = true;
 
 	// Lock the file writing
-	fnlock.lock('fileWrite',function(release){
+	return fnlock.lock('fileWrite',function(release){
 
-		// Close the file
-		fs.close(self._fd,function(err){
-			if ( err ) {
-				console.log("Error closing queue file '"+self._opts.file+"': ",err);
-				release();
-				return finish(err,null);
-			}
-			self._fd = null;
+		return aIf(self._fd != null,
+			function(next){
 
-			// Open file for rewriting
-			return fs.open(self._opts.file,"w",function(err,fd){
-				if ( err ) {
-					console.log("Error openning queue file '"+self._opts.file+"' for writing: ",err);
-					release();
-					return finish(err,null);
-				}
-				self._fd = fd;
-
-				// Write all the data
-				return async.mapSeries(self._q,
-					function(item,next){
-						var strData;
-						strData = (type == 1) ? item : (type == 2) ? item.toString() : (type == 3) ? "" : JSON.stringify(item);
-					  	b = new Buffer("YXXXX"+strData);
-					    size = b.length - 5;
-					    b[0] = (0x01 << 4) | type;
-					    b[1] = (size >> 24  & 0xff);
-					    b[2] = (size >> 16  & 0xff);
-					    b[3] = (size >>  8  & 0xff);
-					    b[4] = (size        & 0xff);
-
-					    // Write
-					    return fs.write(self._fd,b,0,b.length,null,function(err,res){
-					    	if ( err )
-					    		return next(err,null);
-
-					    	// Next!
-					    	return next();
-					    });
-					},
-					function(err,res){
-						if ( err ) {
-					    	console.log("Error writing data to queue file: ",err);
-					    	release();
-					    	return finish(err,null);
-					    }
-
-					    // Sync data
-					    return fs.fsync(self._fd,function(err){
-					    	if ( err ) {
-					    		console.log("Error syncing queue file: ",err);
-					    		release();
-					    		return finish(err,null);
-					    	}
-
-							release();
-					    	return finish(null,true);
-					    });
+				// Close the file
+				return fs.close(self._fd,function(err){
+					if ( err ) {
+						console.log("Error closing queue file '"+self._opts.file+"': ",err);
+						release();
+						return finish(err,null);
 					}
-				);
-			});
-		});
+					self._fd = null;
+					return next();
+				});
+
+			},
+			function(){
+
+				// Open file for rewriting
+				return fs.open(self._opts.file,"w",function(err,fd){
+					if ( err ) {
+						console.log("Error openning queue file '"+self._opts.file+"' for writing: ",err);
+						release();
+						return finish(err,null);
+					}
+					self._fd = fd;
+
+					// Write all the data
+					return async.mapSeries(self._q,
+						function(item,next){
+							var
+								b = _itemToBuffer(item);
+
+						    // Write
+						    return fs.write(self._fd,b,0,b.length,null,function(err,res){
+						    	if ( err )
+						    		return next(err,null);
+
+						    	// Next!
+						    	return next();
+						    });
+						},
+						function(err,res){
+							if ( err ) {
+						    	console.log("Error writing data to queue file: ",err);
+						    	release();
+						    	return finish(err,null);
+						    }
+
+						    // Sync data
+						    return fs.fsync(self._fd,function(err){
+						    	if ( err ) {
+						    		console.log("Error syncing queue file: ",err);
+						    		release();
+						    		return finish(err,null);
+						    	}
+
+								release();
+						    	return finish(null,true);
+						    });
+						}
+					);
+				});
+
+			}
+		);
+
 	});
 
 }
 
+// Convert a data item into a buffer for being stored
+function _itemToBuffer(item) {
+
+	var
+		type = (typeof item == "string") ? 1 : (typeof item == "number") ? 2 : (item == null) ? 3 : 4,
+		strData,
+		b;
+
+	// Convert item into a string
+	strData = (type == 1) ? item : (type == 2) ? item.toString() : (type == 3) ? "" : JSON.stringify(item);
+
+    return _entryEncode(0x01,type,strData);
+
+}
+
+function _entryEncode(op,type,strData) {
+
+	var
+		b = new Buffer("YXXXX"+strData),
+		size;
+
+  	// Set the size
+    size = b.length - 5;
+    b[0] = (0x01 << 4) | type;
+    b[1] = (size >> 24  & 0xff);
+    b[2] = (size >> 16  & 0xff);
+    b[3] = (size >>  8  & 0xff);
+    b[4] = (size        & 0xff);
+
+    return b;
+
+}
+
+function _entryDecodeHeader(header) {
+
+	var
+		op   = (header[0] >> 4) & 0x0f,
+		type = header[0] & 0x0f,
+		size = (header[1] << 24) | (header[2] << 16) | (header[3] << 8) | header[4];
+
+	return { op: op, type: type, size: size };
+
+}
 
 
 // Push something into to the queue
@@ -404,7 +456,6 @@ function queuePush(data,handler) {
 
 	var
 		strData,
-		type = (typeof data == "string") ? 1 : (typeof data == "number") ? 2 : (data == null) ? 3 : 4,
 		b,
 		size;
 
@@ -415,18 +466,11 @@ function queuePush(data,handler) {
 		throw new Error("The queue is not yet ready. Wait for 'ready' event");
 
 	// Add to memory queue
-	this._q.push({type: type, data: data});
+	this._q.push(data);
 	this._dirty = true;
 
 	// Write on the file
-	strData = (type == 1) ? data : (type == 2) ? data.toString() : (type == 3) ? "" : JSON.stringify(data);
-  	b = new Buffer("YXXXX"+strData);
-    size = b.length - 5;
-    b[0] = (0x01 << 4) | type;
-    b[1] = (size >> 24  & 0xff);
-    b[2] = (size >> 16  & 0xff);
-    b[3] = (size >>  8  & 0xff);
-    b[4] = (size        & 0xff);
+	b = _itemToBuffer(data);
 
 	// Add to file
 	return handler ? _writeFileAsync.apply(this,[b,handler]) : _writeFileSync.apply(this,[b]);
@@ -456,10 +500,7 @@ function queueShift(handler) {
 	this._dirty = true;
 
 	// Write a "shift" to file
-  	b = new Buffer("YXXXX");
-    size = b.length - 5;
-    b[0] = (2 << 4);
-	b[1] = b[2] = b[3] = b[4] = 0;
+	b = _entryEncode(2,0,"");
 
 	// Remove from file asyncronously
 	if ( !this._opts.sync ) {
@@ -470,7 +511,7 @@ function queueShift(handler) {
 			}
 
 			// Return the data
-			return handler(null,item.data);
+			return handler(null,item);
 		}]);
 	}
 
@@ -478,7 +519,7 @@ function queueShift(handler) {
 	_writeFileSync.apply(this,[b]);
 
 	// Return the data
-	return item.data;
+	return item;
 
 }
 
