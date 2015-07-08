@@ -9,7 +9,7 @@ var
 try { fs.unlinkSync("test/data/file_sync.db"); } catch(ex) { }
 
 // Create the queue
-queue = new SolidQueue("test/data/file_sync.db");
+queue = new SolidQueue({file:"test/data/file_sync.db",sync:true});
 
 // Push a number
 queue.push("a");

@@ -5,7 +5,8 @@ var
 	events	= require('events'),
 	util	= require('util'),
 	async	= require('async'),
-	fnlock	= require('fnlock');
+	fnlock	= require('fnlock'),
+	uuid	= require('uuid');
 
 
 // The queue
@@ -15,9 +16,13 @@ module.exports = function(opts){
 		self = this;
 
 	// My properties
-	self._q = [];
-	self._dirty = false;
-	self._compiling = false;
+	self._q					= [];
+	self._dirty				= false;
+	self._compiling			= false;
+	self._waitCompile		= [];
+	self._waitData			= [];
+	self._ready				= false;
+	self._drain				= true;
 
 	// My methods
 	self._loadSync			= _loadSync;
@@ -27,9 +32,6 @@ module.exports = function(opts){
 	self._init				= _init;
 	self._initSync			= _initSync;
 	self._initAsync			= _initAsync;
-	self._waitCompile		= [];
-	self._ready				= false;
-	self._drain				= true;
 	self.push				= queuePush;
 	self.shift				= queueShift;
 	self.compile			= _compileFile;
@@ -38,7 +40,7 @@ module.exports = function(opts){
 
 	// Work on the options
 	if ( typeof opts == "string" )
-		opts = { file: opts, sync: true };
+		opts = { file: opts };
 	self._opts = opts;
 
 	// Initialize
@@ -110,7 +112,7 @@ function _loadSync() {
 
 	var
 		self	= this,
-		header	= new Buffer(5),
+		header	= new Buffer("OIIIIIIIIIIIIIIIISSSST"),
 		stats	= { added: 0, removed: 0 },
 		fd;
 
@@ -119,7 +121,7 @@ function _loadSync() {
 
 	// Open and read all data inside of the file
 	fd = fs.openSync(this._opts.file,"r");
-	while ( fs.readSync(fd,header,0,5) ) {
+	while ( fs.readSync(fd,header,0,header.length) ) {
 		var
 			entry = _entryDecodeHeader(header),
 			rBytes;
@@ -172,10 +174,10 @@ function _loadAsync(handler) {
 				function(){return hasData;},
 				function(next){
 					var
-						header = new Buffer("YXXXX");
+						header = new Buffer("OIIIIIIIIIIIIIIIISSSST");
 
 					// Read the header
-					return fs.read(fd,header,0,5,null,function(err,rBytes){
+					return fs.read(fd,header,0,header.length,null,function(err,rBytes){
 						if ( err ) {
 							console.log("Error reading from queue file '"+opts.file+"': ",err);
 							hasData = false;
@@ -187,8 +189,8 @@ function _loadAsync(handler) {
 							hasData = false;
 							return next();
 						}
-						if ( rBytes < 5 ) {
-							console.log("Error reading data entry header from queue file (got "+rBytes+" instead of 5)");
+						if ( rBytes < header.length ) {
+							console.log("Error reading data entry header from queue file (got "+rBytes+" instead of "+header.length+")");
 							hasData = false;
 							return next(err,null);
 						}
@@ -196,6 +198,7 @@ function _loadAsync(handler) {
 						var
 							entry	= _entryDecodeHeader(header);
 
+						// If this item has data, read it!
 						return aIf(entry.size > 0,
 							function(proc){
 
@@ -406,58 +409,13 @@ function _compileFileAsync(handler) {
 
 }
 
-// Convert a data item into a buffer for being stored
-function _itemToBuffer(item) {
-
-	var
-		type = (typeof item == "string") ? 1 : (typeof item == "number") ? 2 : (item == null) ? 3 : 4,
-		strData,
-		b;
-
-	// Convert item into a string
-	strData = (type == 1) ? item : (type == 2) ? item.toString() : (type == 3) ? "" : JSON.stringify(item);
-
-    return _entryEncode(0x01,type,strData);
-
-}
-
-function _entryEncode(op,type,strData) {
-
-	var
-		b = new Buffer("YXXXX"+strData),
-		size;
-
-  	// Set the size
-    size = b.length - 5;
-    b[0] = (0x01 << 4) | type;
-    b[1] = (size >> 24  & 0xff);
-    b[2] = (size >> 16  & 0xff);
-    b[3] = (size >>  8  & 0xff);
-    b[4] = (size        & 0xff);
-
-    return b;
-
-}
-
-function _entryDecodeHeader(header) {
-
-	var
-		op   = (header[0] >> 4) & 0x0f,
-		type = header[0] & 0x0f,
-		size = (header[1] << 24) | (header[2] << 16) | (header[3] << 8) | header[4];
-
-	return { op: op, type: type, size: size };
-
-}
-
 
 // Push something into to the queue
 function queuePush(data,handler) {
 
 	var
-		strData,
-		b,
-		size;
+		item,
+		b;
 
     if ( !handler && !this._opts.sync )
     	throw new Error("Trying to use a syncronous version of push() but the queue is not on syncronous mode (sync option)");
@@ -465,12 +423,20 @@ function queuePush(data,handler) {
 	if ( !this._ready )
 		throw new Error("The queue is not yet ready. Wait for 'ready' event");
 
+	// Create the item
+	item = {
+		id:		uuid.v1(),
+		data:	data
+	};
+
 	// Add to memory queue
-	this._q.push(data);
+	this._q.push(item);
+
+	// We are dirty (requiring a compile)
 	this._dirty = true;
 
 	// Write on the file
-	b = _itemToBuffer(data);
+	b = _itemToBuffer(item);
 
 	// Add to file
 	return handler ? _writeFileAsync.apply(this,[b,handler]) : _writeFileSync.apply(this,[b]);
@@ -482,8 +448,7 @@ function queueShift(handler) {
 
 	var
 		item,
-		b,
-		size;
+		b;
 
     if ( !handler && !this._opts.sync )
     	throw new Error("Trying to use a syncronous version of push() but the queue is not on syncronous mode (sync option)");
@@ -492,15 +457,37 @@ function queueShift(handler) {
 		throw new Error("The queue is not yet ready. Wait for 'ready' event");
 
 	// Nothing in memory, nothing on the file
-	if ( this._q.length == 0 )
-		return handler ? handler(null,null) : null;
+	if ( this._q.length == 0 ) {
+
+		// Syncronous mode just returns null (what can we do?)
+		if ( self._opts.sync )
+			return null;
+
+		// Asyncronous mode registers the handler that will be called when we have data
+		return self._waitData.push(handler);
+	}
+
+	// Now that we have data, proceed!
+	return _queueShift.apply(this,[handler]);
+
+}
+
+// Really shift, not kidding
+function _queueShift(handler) {
+
+	var
+		item,
+		b;
 
 	// Get data from memory
 	item = this._q.shift();
+
+	// We are dirty (requiring a compile)
 	this._dirty = true;
 
+
 	// Write a "shift" to file
-	b = _entryEncode(2,0,"");
+	b = _entryEncode({op:2,id:item.id});
 
 	// Remove from file asyncronously
 	if ( !this._opts.sync ) {
@@ -511,7 +498,7 @@ function queueShift(handler) {
 			}
 
 			// Return the data
-			return handler(null,item);
+			return handler(null,item.data);
 		}]);
 	}
 
@@ -519,9 +506,77 @@ function queueShift(handler) {
 	_writeFileSync.apply(this,[b]);
 
 	// Return the data
+	return item.data;
+
+}
+
+
+// Convert a data item into a buffer for being stored
+function _itemToBuffer(item) {
+
+	var
+		strData;
+
+	// Detect item type
+	item.type = (typeof item.data == "string") ? 1 : (typeof item.data == "number") ? 2 : (item.data == null) ? 3 : 4;
+
+	// Convert item into a string
+	strData = (item.type == 1) ? item.data : (item.type == 2) ? item.data.toString() : (item.type == 3) ? "" : JSON.stringify(item.data);
+
+	// Encode it
+    return _entryEncode(item,strData);
+
+}
+
+// Encode an entry
+function _entryEncode(item,strData) {
+
+	var
+		b = new Buffer("OIIIIIIIIIIIIIIIISSSST"+strData), // O=OP, I=ID, S=SIZE, T=TYPE
+		size;
+
+	// Operation
+	b[0] = item.op;
+
+	// Convert the ID into a binary and store it on buffer
+	uuid.parse(item.id,b,1);
+
+  	// Data size
+    size = b.length - 22;
+    b[17] = (size >> 24  & 0xff);
+    b[18] = (size >> 16  & 0xff);
+    b[19] = (size >>  8  & 0xff);
+    b[20] = (size        & 0xff);
+
+    // Set the type
+    b[21] = item.type;
+
+    return b;
+
+}
+
+// Decode the header of an entry
+function _entryDecodeHeader(b) {
+
+	var
+		item = {};
+
+	// Operation
+	item.op = b[0];
+
+	// Convert the binary ID into a string ID
+	item.id = uuid.parse(b,1);
+
+	// Data size
+	item.size = (b[17] << 24) | (b[18] << 16) | (b[19] << 8) | b[20];
+
+	// Type
+	item.type = b[21];
+
 	return item;
 
 }
+
 
 // Write to the file, syncronously or asyncronously
 function _writeFileSync(data) {
