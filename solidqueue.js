@@ -542,6 +542,9 @@ function _itemAckSync(item) {
 	// Remove from file syncronously
 	_writeFileSync.apply(this,[b]);
 
+	// We are dirty (requiring a compile)
+	this._dirty = true;
+
 //	console.log("Sync ack of '"+item.id+"'");
 
 }
@@ -564,6 +567,9 @@ function _itemAckAsync(item,handler) {
 			console.log("Error writing the shift to disk: ",err);
 			return handler(err,null);
 		}
+
+		// We are dirty (requiring a compile)
+		this._dirty = true;
 
 //		console.log("Async ack of '"+item.id+"'");
 		return handler(null,true);
