@@ -17,9 +17,10 @@ module.exports = function(opts){
 
 	// My properties
 	self._q					= [];
+	self._waitAck			= {};
 	self._dirty				= false;
 	self._compiling			= false;
-	self._waitCompile		= [];
+//	self._waitCompile		= [];
 	self._waitData			= [];
 	self._ready				= false;
 	self._drain				= true;
@@ -336,7 +337,8 @@ function _compileFileAsync(handler) {
 //				console.log("Compiled!");
 			self._compiling = false;
 			return handler ? handler(err,status) : null;
-		};
+		},
+		toCompile;
 
 	self._compiling = true;
 
@@ -369,8 +371,15 @@ function _compileFileAsync(handler) {
 					}
 					self._fd = fd;
 
+					// Build the list of items to be compiled
+					toCompile = self._q.slice(0);
+					for ( var k in self._waitAck ) {
+						if ( self._waitAck[k] )
+							toCompile.push(self._waitAck[k]);
+					}
+
 					// Write all the data
-					return async.mapSeries(self._q,
+					return async.mapSeries(toCompile,
 						function(item,next){
 							var
 								b = _itemToBuffer(item);
@@ -478,7 +487,6 @@ function queueShift(handler) {
 
 	// Nothing in memory, nothing on the file
 	if ( self._q.length == 0 ) {
-
 		// Syncronous mode just returns null (what can we do?)
 		if ( self._opts.sync )
 			return null;
@@ -500,7 +508,10 @@ function _queueShift(handler) {
 		item;
 
 	// Get data from memory
-	item = this._q.shift();
+	item = self._q.shift();
+
+	// This item will be waiting for acknowledge
+	self._waitAck[item.id] = item;
 
 	// Return the data and the acknowledge function
 	if ( self._opts.sync ) {
@@ -521,6 +532,10 @@ function _itemAckSync(item) {
 	var
 		b;
 
+	// Delete from acknowledge waiting list
+//	delete this._waitAck[item.id];
+	this._waitAck[item.id] = null;
+
 	// Write a "shift" to file
 	b = _entryEncode({op:2,id:item.id});
 
@@ -536,6 +551,10 @@ function _itemAckAsync(item,handler) {
 
 	var
 		b;
+
+	// Delete from acknowledge waiting list
+//	delete this._waitAck[item.id];
+	this._waitAck[item.id] = null;
 
 	// Write a "shift" to file
 	b = _entryEncode({op:2,id:item.id});
@@ -633,7 +652,7 @@ function _writeFileAsync(data,handler) {
 	var
 		self = this;
 
-	// Lock the file writing
+	// Lock the file writing (we can't write at the same time)
 	fnlock.lock('fileWrite',function(release){
 
 		return fs.write(self._fd,data,0,data.length,null,function(err,res){

@@ -13,14 +13,21 @@ queue = new SolidQueue({file:"test/data/file_async.db"});
 
 queue.on('ready',function(){
 
-	// Things to test
 	var
 		sstart = new Date();
 
 	// Shift
 	queue.shift(function(err,item,ack){
 		n++;
-		return ack();
+
+		// Acknowledge
+		return ack(function(err){
+			if ( err ) {
+				console.log("shift(WAIT): failed! Error acknowledging the first item: ",err);
+				return process.exit(-2);
+			}
+			// ok
+		});
 	});
 	queue.shift(function(err,item,ack){
 		if ( err ) {
@@ -41,8 +48,16 @@ queue.on('ready',function(){
 			return process.exit(-1);
 		}
 
-		console.log("shift(WAIT): ok");
-		return process.exit(0);
+		// Acknowledge
+		return ack(function(err){
+			if ( err ) {
+				console.log("shift(WAIT): failed! Error acknowledging the second item: ",err);
+				return process.exit(-2);
+			}
+
+			console.log("shift(WAIT): ok");
+			return process.exit(0);
+		});
 	});
 
 	setTimeout(function(){

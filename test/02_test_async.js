@@ -43,15 +43,15 @@ queue.on('ready',function(){
 					}
 
 					// Acknowledge
-/*					ack(function(err,ok){
+					ack(function(err,ok){
 						if ( err ) {
 							console.log("shift(push("+JSON.stringify(test)+")): failed! Error acknowledging item "+item+": ",err);
 							return process.exit(-1);
 						}
-*/
+
 						console.log("shift(push("+JSON.stringify(test)+")): ok");
 						return next();
-//					});
+					});
 				});
 			});
 		},
