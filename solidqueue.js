@@ -35,10 +35,11 @@ module.exports = function(opts){
 	self._initAsync			= _initAsync;
 	self._itemAckSync		= _itemAckSync;
 	self._itemAckAsync		= _itemAckAsync;
+
 	self.push				= queuePush;
 	self.shift				= queueShift;
 	self.compile			= _compileFile;
-	self.save				= _compileFile;
+	self.store				= _compileFile;
 	self.toArray			= function(){ return self._q; };
 	self.length				= function(){ return self._q.length; };
 	self.size				= self.length;
@@ -328,48 +329,32 @@ function _compileFileAsync(handler) {
 
 	var
 		self = this,
-		finish = function(err,status){
-			if ( err ) {
-				// FIX ME
-				console.log("Error compiling file. Have no big idea about what to do...");
-			}
-//			else
-//				console.log("Compiled!");
-			self._compiling = false;
-			return handler ? handler(err,status) : null;
-		},
+		tempFD,
 		toCompile;
 
+
+	// Mark as compiling...
 	self._compiling = true;
 
 	// Lock the file writing
 	return fnlock.lock('fileWrite',function(release){
 
-		return aIf(self._fd != null,
-			function(next){
+		return async.series(
+			[
+				// Open temporary file for writing
+				function(next){
+					return fs.open(self._opts.file+".tmp","w",function(err,fd){
+						if ( err )
+							console.log("Error openning temporary queue file '"+self._opts.file+"' for writing: ",err);
+						else
+							tempFD = fd;
 
-				// Close the file
-				return fs.close(self._fd,function(err){
-					if ( err ) {
-						console.log("Error closing queue file '"+self._opts.file+"': ",err);
-						release();
-						return finish(err,null);
-					}
-					self._fd = null;
-					return next();
-				});
+						return next(err,fd);
+					});
+				},
 
-			},
-			function(){
-
-				// Open file for rewriting
-				return fs.open(self._opts.file,"w",function(err,fd){
-					if ( err ) {
-						console.log("Error openning queue file '"+self._opts.file+"' for writing: ",err);
-						release();
-						return finish(err,null);
-					}
-					self._fd = fd;
+				// Write all the items on the queue and waiting acknowledge
+				function(next){
 
 					// Build the list of items to be compiled
 					toCompile = self._q.slice(0);
@@ -380,41 +365,81 @@ function _compileFileAsync(handler) {
 
 					// Write all the data
 					return async.mapSeries(toCompile,
-						function(item,next){
+						function(item,nextItem){
 							var
 								b = _itemToBuffer(item);
 
-						    // Write
-						    return fs.write(self._fd,b,0,b.length,null,function(err,res){
-						    	if ( err )
-						    		return next(err,null);
-
-						    	// Next!
-						    	return next();
-						    });
+							// Write
+							return fs.write(tempFD,b,0,b.length,null,nextItem);
 						},
 						function(err,res){
-							if ( err ) {
-						    	console.log("Error writing data to queue file: ",err);
-						    	release();
-						    	return finish(err,null);
-						    }
+							if ( err )
+								console.log("Error writing data to temporary queue file: ",err);
 
-						    // Sync data
-						    return fs.fsync(self._fd,function(err){
-						    	if ( err ) {
-						    		console.log("Error syncing queue file: ",err);
-						    		release();
-						    		return finish(err,null);
-						    	}
-
-								release();
-						    	return finish(null,true);
-						    });
+							return next(err,res);
 						}
 					);
-				});
+				},
 
+				// Close the file
+				function(next){
+					return fs.close(tempFD,function(err){
+						if ( err )
+							console.log("Error closing temporary queue file '"+self._opts.file+"': ",err);
+
+						return next(err,null);
+					});
+				},
+
+				// Move the temporary file to definitive
+				function(next) {
+					return fs.rename(self._opts.file+".tmp",self._opts.file,function(err){
+						if ( err )
+							console.log("Error moving temporary file '"+self._opts.file+"'.tmp to definitive "+self._opts.file);
+
+						return next(err,null);
+					});
+				},
+
+				// Close the description (if it's open)
+				function(next){
+					if ( self._fd == null )
+						return next(null,false);
+
+					// Close the file
+					return fs.close(self._fd,function(err){
+						if ( err )
+							console.log("Error closing queue file '"+self._opts.file+"' for reopening: ",err);
+
+						return next(err,null);
+					});
+				},
+
+				// Open the queue file
+				function(next){
+					return fs.open(self._opts.file,"a",function(err,fd){
+						if ( err )
+							console.log("Error openning queue file '"+opts.file+"': ",err);
+						else
+							self._fd = fd;
+
+						return next(err,fd);
+					});
+				}
+			],
+			function(err,res){
+				if ( err ) {
+					console.log("Error compiling queue file '"+self._opts.file+"': ",err);
+					self.emit('error','compile',err);
+				}
+				else {
+					console.log("Successfully compiled queue file");
+					self.emit('compile',true);
+				}
+
+				self._compiling = false;
+				release();
+				return handler ? handler(err,res) : null;
 			}
 		);
 
@@ -553,23 +578,24 @@ function _itemAckSync(item) {
 function _itemAckAsync(item,handler) {
 
 	var
+		self = this,
 		b;
 
 	// Delete from acknowledge waiting list
 //	delete this._waitAck[item.id];
-	this._waitAck[item.id] = null;
+	self._waitAck[item.id] = null;
 
 	// Write a "shift" to file
 	b = _entryEncode({op:2,id:item.id});
 
-	return _writeFileAsync.apply(this,[b,function(err){
+	return _writeFileAsync.apply(self,[b,function(err){
 		if ( err ) {
 			console.log("Error writing the shift to disk: ",err);
 			return handler(err,null);
 		}
 
 		// We are dirty (requiring a compile)
-		this._dirty = true;
+		self._dirty = true;
 
 //		console.log("Async ack of '"+item.id+"'");
 		return handler(null,true);
