@@ -117,7 +117,7 @@ function _initAsync() {
 
 }
 
-// Load the queue file (syncronously)
+// Load the queue file (synchronously)
 function _loadSync() {
 
 	var
@@ -154,7 +154,7 @@ function _loadSync() {
 
 }
 
-// Load the queue file (asyncronously)
+// Load the queue file (asynchronous)
 function _loadAsync(handler) {
 
 	var
@@ -478,7 +478,7 @@ function queuePush(data,handler) {
 		};
 
     if ( !handler && !this._opts.sync )
-    	throw new Error("Trying to use a syncronous version of push() but the queue is not on syncronous mode (sync option)");
+    	throw new Error("Trying to use a synchronous version of push() but the queue is not on synchronous mode (sync option)");
 
 	if ( !this._ready )
 		throw new Error("The queue is not yet ready. Wait for 'ready' event");
@@ -512,18 +512,18 @@ function queueShift(handler) {
 		b;
 
     if ( !handler && !this._opts.sync )
-    	throw new Error("Trying to use a syncronous version of push() but the queue is not on syncronous mode (sync option)");
+    	throw new Error("Trying to use a synchronous version of push() but the queue is not on synchronous mode (sync option)");
 
 	if ( !this._ready )
 		throw new Error("The queue is not yet ready. Wait for 'ready' event");
 
 	// Nothing in memory, nothing on the file
 	if ( self._q.length == 0 ) {
-		// Syncronous mode just returns null (what can we do?)
+		// Synchronous mode just returns null (what can we do?)
 		if ( self._opts.sync )
 			return null;
 
-		// Asyncronous mode registers the handler that will be called when we have data
+		// Asynchronous mode registers the handler that will be called when we have data
 		return self._waitData.push(handler);
 	}
 
@@ -558,7 +558,7 @@ function _queueShift(handler) {
 	}
 }
 
-// Acknowledge an item (syncronously)
+// Acknowledge an item (synchronous)
 function _itemAckSync(item) {
 
 	var
@@ -571,7 +571,7 @@ function _itemAckSync(item) {
 	// Write a "shift" to file
 	b = _entryEncode({op:2,id:item.id});
 
-	// Remove from file syncronously
+	// Remove from file asynchronously
 	_writeFileSync.apply(this,[b]);
 
 	// We are dirty (requiring a compile)
@@ -581,7 +581,7 @@ function _itemAckSync(item) {
 
 }
 
-// Acknowledge an item (asyncronously)
+// Acknowledge an item (asynchronous)
 function _itemAckAsync(item,handler) {
 
 	var
@@ -683,7 +683,7 @@ function _entryDecodeHeader(b) {
 }
 
 
-// Write to the file, syncronously or asyncronously
+// Write to the file, synchronous or asynchronous
 function _writeFileSync(data) {
 
 	fs.writeSync(this._fd,data,0,data.length,null);
