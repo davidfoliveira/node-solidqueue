@@ -107,6 +107,10 @@ function _initAsync() {
 			// Ready!
 			self._ready = true;
 			self.emit('ready',true);
+
+			// Queue has items? Pick the first and emit 'nextItem'
+			if ( self._q.length > 0 )
+				self.emit('nextItem',self._q[0],'init');
 		});
 
 	});
@@ -176,7 +180,7 @@ function _loadAsync(handler) {
 				hasData = true;
 
 			// Read the file in parts
-			async.whilst(
+			return async.whilst(
 				function(){return hasData;},
 				function(next){
 					var
@@ -339,6 +343,7 @@ function _compileFileAsync(handler) {
 	// Lock the file writing
 	return fnlock.lock('fileWrite',function(release){
 
+		// All process of compile
 		return async.series(
 			[
 				// Open temporary file for writing
@@ -433,7 +438,7 @@ function _compileFileAsync(handler) {
 					self.emit('error','compile',err);
 				}
 				else {
-					console.log("Successfully compiled queue file");
+//					console.log("Successfully compiled queue file");
 					self.emit('compile',true);
 				}
 
@@ -455,8 +460,8 @@ function queuePush(data,handler) {
 		self = this,
 		item,
 		b,
+		wasEmpty = (self._q.length == 0),
 		checkWaitersAndGo = function(err,res){
-
 			// Call the callback
 			handler(err,res);
 
@@ -466,7 +471,10 @@ function queuePush(data,handler) {
 					_queueShift.apply(self,[self._waitData.shift()]);
 				}
 			}
-
+			else if ( wasEmpty && self._waitAck.length == 0 ) {
+				// Emit nextItem
+				self.emit('nextItem',self._q[0],'push');
+			}
 		};
 
     if ( !handler && !this._opts.sync )
@@ -508,7 +516,6 @@ function queueShift(handler) {
 
 	if ( !this._ready )
 		throw new Error("The queue is not yet ready. Wait for 'ready' event");
-
 
 	// Nothing in memory, nothing on the file
 	if ( self._q.length == 0 ) {
@@ -587,7 +594,6 @@ function _itemAckAsync(item,handler) {
 
 	// Write a "shift" to file
 	b = _entryEncode({op:2,id:item.id});
-
 	return _writeFileAsync.apply(self,[b,function(err){
 		if ( err ) {
 			console.log("Error writing the shift to disk: ",err);
@@ -597,8 +603,14 @@ function _itemAckAsync(item,handler) {
 		// We are dirty (requiring a compile)
 		self._dirty = true;
 
+		// Tell that we acknowledged
+		handler(null,true);
+
+		// Pick the next item on the queue
+		if ( self._q.length > 0 )
+			self.emit('nextItem',self._q[0],'ack');
+
 //		console.log("Async ack of '"+item.id+"'");
-		return handler(null,true);
 	}]);
 
 }
