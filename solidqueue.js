@@ -501,7 +501,7 @@ function queuePush(data,handler) {
 //		throw new Error("Trying to use a synchronous version of push() but the queue is not on synchronous mode (sync option)");
 
 	if ( !this._ready )
-		throw new Error("The queue is not yet ready. Wait for 'ready' event");
+		throw new Error("The queue is not ready yet. Wait for 'ready' event");
 
 	// Create the item
 	item = {
@@ -662,7 +662,7 @@ function _itemToBuffer(item) {
 function _entryEncode(item,strData) {
 
 	var
-		b = new Buffer("OIIIIIIIIIIIIIIIISSSST"+strData), // O=OP, I=ID, S=SIZE, T=TYPE
+		b = new Buffer("OIIIIIIIIIIIIIIIISSSST"+((strData == null)?"":strData)), // O=OP, I=ID, S=SIZE, T=TYPE
 		size;
 
 	// Operation
