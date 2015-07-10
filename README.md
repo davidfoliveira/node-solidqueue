@@ -2,7 +2,7 @@
 
 `solidqueue` can be used either on synchronous and asynchronous ways. It saves the queue state on a file and supports journaling.
 
-## Syncronous:
+## Synchronous:
 
 	var
 	    SolidQueue = require('solidqueue'),
