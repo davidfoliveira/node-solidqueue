@@ -18,6 +18,7 @@ module.exports = function(opts){
 	// My properties
 	self._q					= [];
 	self._waitAck			= {};
+	self._waitAckCount		= 0;
 	self._dirty				= false;
 	self._compiling			= false;
 //	self._waitCompile		= [];
@@ -259,25 +260,37 @@ function _loadAsync(handler) {
 function _loadProcessEntry(entry,stats) {
 
 	var
-		data;
+		self	= this,
+		found	= null;
 
 	// Add to queue
 	if ( entry.op == 1 ) {
 		// Parse data according to it's type
-		data = (entry.type == 1) ? entry.data.toString() : (entry.type == 2) ? parseFloat(entry.data.toString()) : (entry.type == 3) ? null : JSON.parse(entry.data);
+		entry.data = (entry.type == 1) ? entry.data.toString() : (entry.type == 2) ? parseFloat(entry.data.toString()) : (entry.type == 3) ? null : JSON.parse(entry.data);
 
 		// Add to queue
-		this._q.push(data);
+		this._q.push(entry);
 
 		// Affect statistics
 		if ( stats )
 			stats.added++;
 	}
 	// Remove from queue
-	else if ( op == 2 ) {
+	else if ( entry.op == 2 ) {
+		// Search the item on the queue
+		for ( var x = 0 ; x < self._q.length ; x++ ) {
+			if ( self._q[x].id == entry.id ) {
+				found = x;
+				break;
+			}
+		}
+		if ( found == null ) {
+			console.log("Weird stuff. Ack of an item that is not on the queue.. well, ignoring it..");
+			return;
+		}
 
-		// Remove from queue
-		this._q.shift();
+		// Remove from the queue
+		self._q.splice(found,1);
 
 		// Affect statistics
 		if ( stats )
@@ -302,7 +315,8 @@ function _compileFileSync() {
 
 	var
 		self = this,
-		fd;
+		fd,
+		toCompile;
 
 	self._compiling = true;
 
@@ -314,9 +328,14 @@ function _compileFileSync() {
 
 	// Open file again for rewriting it
 	self._fd = fs.openSync(self._opts.file,"w");
-	self._q.forEach(function(item){
+	toCompile = self._q.slice(0);
+	for ( var k in self._waitAck ) {
+		if ( self._waitAck[k] )
+			toCompile.push(self._waitAck[k]);
+	}
+	toCompile.forEach(function(item){
 		var
-			b = _itemToBuffer(data);
+			b = _itemToBuffer(item);
 
 		fs.writeSync(this._fd,b,0,b.length,null);
 	});
@@ -442,6 +461,7 @@ function _compileFileAsync(handler) {
 					self.emit('compile',true);
 				}
 
+				self._dirty = false;
 				self._compiling = false;
 				release();
 				return handler ? handler(err,res) : null;
@@ -471,20 +491,21 @@ function queuePush(data,handler) {
 					_queueShift.apply(self,[self._waitData.shift()]);
 				}
 			}
-			else if ( wasEmpty && self._waitAck.length == 0 ) {
+			else if ( wasEmpty && self._waitAckCount == 0 ) {
 				// Emit nextItem
 				self.emit('nextItem',self._q[0],'push');
 			}
 		};
 
-    if ( !handler && !this._opts.sync )
-    	throw new Error("Trying to use a synchronous version of push() but the queue is not on synchronous mode (sync option)");
+//	if ( !handler && !this._opts.sync )
+//		throw new Error("Trying to use a synchronous version of push() but the queue is not on synchronous mode (sync option)");
 
 	if ( !this._ready )
 		throw new Error("The queue is not yet ready. Wait for 'ready' event");
 
 	// Create the item
 	item = {
+		op:		1,
 		id:		uuid.v1(),
 		data:	data
 	};
@@ -511,8 +532,8 @@ function queueShift(handler) {
 		item,
 		b;
 
-    if ( !handler && !this._opts.sync )
-    	throw new Error("Trying to use a synchronous version of push() but the queue is not on synchronous mode (sync option)");
+	if ( !handler && !this._opts.sync )
+		throw new Error("Trying to use a synchronous version of push() but the queue is not on synchronous mode (sync option)");
 
 	if ( !this._ready )
 		throw new Error("The queue is not yet ready. Wait for 'ready' event");
@@ -544,6 +565,7 @@ function _queueShift(handler) {
 
 	// This item will be waiting for acknowledge
 	self._waitAck[item.id] = item;
+	self._waitAckCount++;
 
 	// Return the data and the acknowledge function
 	if ( self._opts.sync ) {
@@ -567,6 +589,7 @@ function _itemAckSync(item) {
 	// Delete from acknowledge waiting list
 //	delete this._waitAck[item.id];
 	this._waitAck[item.id] = null;
+	this._waitAckCount--;
 
 	// Write a "shift" to file
 	b = _entryEncode({op:2,id:item.id});
@@ -591,6 +614,7 @@ function _itemAckAsync(item,handler) {
 	// Delete from acknowledge waiting list
 //	delete this._waitAck[item.id];
 	self._waitAck[item.id] = null;
+	self._waitAckCount--;
 
 	// Write a "shift" to file
 	b = _entryEncode({op:2,id:item.id});
@@ -604,7 +628,8 @@ function _itemAckAsync(item,handler) {
 		self._dirty = true;
 
 		// Tell that we acknowledged
-		handler(null,true);
+		if ( handler )
+			handler(null,true);
 
 		// Pick the next item on the queue
 		if ( self._q.length > 0 )
@@ -646,17 +671,17 @@ function _entryEncode(item,strData) {
 	// Convert the ID into a binary and store it on buffer
 	uuid.parse(item.id,b,1);
 
-  	// Data size
-    size = b.length - 22;
-    b[17] = (size >> 24  & 0xff);
-    b[18] = (size >> 16  & 0xff);
-    b[19] = (size >>  8  & 0xff);
-    b[20] = (size        & 0xff);
+	// Data size
+	size = b.length - 22;
+	b[17] = (size >> 24  & 0xff);
+	b[18] = (size >> 16  & 0xff);
+	b[19] = (size >>  8  & 0xff);
+	b[20] = (size        & 0xff);
 
-    // Set the type
-    b[21] = item.type;
+	// Set the type
+	b[21] = item.type;
 
-    return b;
+	return b;
 
 }
 
@@ -670,7 +695,7 @@ function _entryDecodeHeader(b) {
 	item.op = b[0];
 
 	// Convert the binary ID into a string ID
-	item.id = uuid.parse(b,1);
+	item.id = uuid.unparse(b,1);
 
 	// Data size
 	item.size = (b[17] << 24) | (b[18] << 16) | (b[19] << 8) | b[20];
