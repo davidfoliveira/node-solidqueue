@@ -20,6 +20,9 @@
   "engines": {
     "node": ">=0.10.5"
   },
+  "scripts": {
+    "test": "./run_tests"
+  },
   "keywords": [
     "queue",
     "crash",
