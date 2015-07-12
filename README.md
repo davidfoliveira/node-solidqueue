@@ -16,8 +16,8 @@
 
 ### Available methods (synchronous mode):
 
-* `push(value)`: Pushes an item into the queue. Throws an error is something unexpected happens.
-* `shift()`: Picks an item from the queue and returns an object like `{data:XX,ack:fn()}` where `data` is the previously pushed item and `ack` is the acknowledge function. Throws an error is something unexpected happens.
+* `push(value)`: Pushes an item into the queue. Throws an error if something unexpected happens.
+* `shift()`: Picks an item from the queue and returns an object like `{data:XX,ack:fn()}` where `data` is the previously pushed item and `ack` is the acknowledge function. Throws an error if something unexpected happens.
 
 ### Available events (synchronous mode):
 
