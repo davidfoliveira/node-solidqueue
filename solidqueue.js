@@ -21,7 +21,6 @@ module.exports = function(opts){
 	self._waitAckCount		= 0;
 	self._dirty				= false;
 	self._compiling			= false;
-//	self._waitCompile		= [];
 	self._waitData			= [];
 	self._ready				= false;
 	self._drain				= true;
@@ -285,7 +284,7 @@ function _loadProcessEntry(entry,stats) {
 			}
 		}
 		if ( found == null ) {
-			console.log("Weird stuff. Ack of an item that is not on the queue.. well, ignoring it..");
+			console.log("Weird stuff. Found on the queue file the ack of an item that is not on the queue.. well, ignoring it..");
 			return;
 		}
 
@@ -611,11 +610,6 @@ function _itemAckAsync(item,handler) {
 		self = this,
 		b;
 
-	// Delete from acknowledge waiting list
-//	delete this._waitAck[item.id];
-	self._waitAck[item.id] = null;
-	self._waitAckCount--;
-
 	// Write a "shift" to file
 	b = _entryEncode({op:2,id:item.id});
 	return _writeFileAsync.apply(self,[b,function(err){
@@ -626,6 +620,12 @@ function _itemAckAsync(item,handler) {
 
 		// We are dirty (requiring a compile)
 		self._dirty = true;
+
+		// Delete from acknowledge waiting list
+//		delete this._waitAck[item.id];
+		self._waitAck[item.id] = null;
+		self._waitAckCount--;
+
 
 		// Tell that we acknowledged
 		if ( handler )
