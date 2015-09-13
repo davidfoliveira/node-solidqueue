@@ -2,7 +2,7 @@
   "author": "David Oliveira <d.oliveira@prozone.org>",
   "name": "solidqueue",
   "description": "A solid and safe (stateful and crash-safe) queue with a simple interface",
-  "version": "0.2.6",
+  "version": "0.3.0",
   "repository": {
     "type": "git",
     "url": "https://github.com/davidfoliveira/node-solidqueue/"

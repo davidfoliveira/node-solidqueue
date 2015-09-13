@@ -49,6 +49,12 @@
 	    });
 	});
 
+### Constructor options (asynchronous mode):
+
+* `file`: Specifies the queue database file path.
+
+* `concurrentItems`: The number of items that can be processed at the same time (the number of times that 'nextItem' event can be called before getting an acknowledge). Watch `nextItem` event bellow.
+
 ### Available methods (asynchronous mode):
 
 * `push(value,callback)`: Pushes an item into the queue and calls the callback. The arguments of callback function are: `(err)`.
@@ -60,5 +66,5 @@
 * `ready`: Fired when the queue is ready.
 * `error`: Fired when some error happens. The event handler is called with two arguments, the phase on what the error happened and the error itself.
 * `nextItem`: Called when a new/next item is available for being processed, which is: after initialization if the queue is not empty, after an acknowledge if the queue is not empty and after a push() if the queue was empty.
-
-
+* `drain`: Fired when the queue gets empty.
+* `free`: Fired then the queue is empty and all the items got acknowledge.

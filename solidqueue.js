@@ -9,7 +9,7 @@ var
 	uuid	= require('uuid');
 
 
-// The queue
+// The queue constructor
 module.exports = function(opts){
 
 	var
@@ -48,6 +48,10 @@ module.exports = function(opts){
 	if ( typeof opts == "string" )
 		opts = { file: opts };
 	self._opts = opts;
+
+	// Some default settings
+	if ( !opts.concurrentItems || typeof opts.concurrentItems != "number" )
+		opts.concurrentItems = 1;
 
 	// Initialize
 	self._init();
@@ -479,7 +483,7 @@ function queuePush(data,handler) {
 		self = this,
 		item,
 		b,
-		wasEmpty = (self._q.length == 0),
+		startLen = self._q.length,
 		checkWaitersAndGo = function(err,res){
 			// Call the callback
 			handler(err,res);
@@ -490,9 +494,19 @@ function queuePush(data,handler) {
 					_queueShift.apply(self,[self._waitData.shift()]);
 				}
 			}
-			else if ( wasEmpty && self._waitAckCount == 0 ) {
-				// Emit nextItem
-				self.emit('nextItem',self._q[0],'push');
+//			else if ( startLen == 0 && self._waitAckCount == 0 ) {
+			else {
+//				console.log("CI: ",self._opts.concurrentItems);
+//				console.log("QL: ",startLen);
+//				console.log("WA: ",self._waitAckCount);
+				if ( startLen < self._opts.concurrentItems && self._opts.concurrentItems > self._waitAckCount ) {
+//console.log("CALLING NEXTITEM");
+					// Emit nextItem
+					self.emit('nextItem',self._q[0],'push');
+				}
+				else {
+//					console.log("NO CALL");
+				}
 			}
 		};
 
@@ -573,9 +587,11 @@ function _queueShift(handler) {
 		}};
 	}
 	else {
-		return handler(null,item.data,function(cb){
+		handler(null,item.data,function(cb){
 			return self._itemAckAsync(item,cb);
 		},item);
+		if ( self._q.length == 0 )
+			self.emit('drain');
 	}
 }
 
@@ -634,6 +650,8 @@ function _itemAckAsync(item,handler) {
 		// Pick the next item on the queue
 		if ( self._q.length > 0 )
 			self.emit('nextItem',self._q[0],'ack');
+		else if ( self._waitAckCount == 0 )
+			self.emit('free');
 
 //		console.log("Async ack of '"+item.id+"'");
 	}]);
