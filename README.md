@@ -38,13 +38,19 @@
 	            return;
 	        }
 
-	        return queue.shift(function(err,item){
+	        return queue.shift(function(err,item,ack){
 	            if ( err ) {
 	                console.log("Error shifting item from queue: ",err);
 	                return;
 	            }
 	            console.log("Got: ",item);
-                return process.exit(0);
+	            ack(function(err,ok){
+                    if ( err ) {
+                        console.log("Error acknowledging item ",item,": ",err);
+                        return process.exit(-1);
+                    }
+                    return process.exit(0);
+	            });
 	        });
 	    });
 	});
